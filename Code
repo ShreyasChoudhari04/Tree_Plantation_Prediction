@@ -1,0 +1,304 @@
+import os
+import requests
+import pandas as pd
+import numpy as np
+import folium
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+
+# --- 1. Zone Definitions (Updated) ---
+zones = {
+    "Alandi": (18.68, 73.73),
+    "Amanora Park Town": (18.52, 73.93),
+    "Balewadi Phata": (18.57, 73.78),
+    "Bhosari": (18.63, 73.81),
+    "Bhumkar Chowk / Bhumkar Nagar": (18.59, 73.88),
+    "Borate Vasti": (18.54, 73.85),
+    "Hadapsar": (18.51, 73.92),
+    "Hinjawadi": (18.58, 73.74),
+    "Karve Road": (18.50, 73.83),
+    "Katraj": (18.45, 73.84),
+    "Kothrud": (18.50, 73.81),
+    "Lohegaon": (18.58, 73.91),
+    "Manjri": (18.48, 73.95),
+    "Model Colony": (18.52, 73.83),
+    "Nigdi": (18.63, 73.77),
+    "Nilanjali Society": (18.51, 73.87),
+    "Panchawati / Pashan": (18.53, 73.80),
+    "Rambaug Colony": (18.53, 73.86),
+    "Revenue Colony-Shivajinagar": (18.53, 73.85),
+    "Sakal Nagar": (18.57, 73.86),
+    "Shivajinagar": (18.53, 73.85),
+    "Sus": (18.63, 73.83),
+    "Tathawade": (18.64, 73.77),
+    "Wakad": (18.61, 73.75)
+}
+
+# --- 2. Custom Zone Areas (Provided by User) ---
+custom_zone_areas = {
+    "Alandi": 6.8,
+    "Amanora Park Town": 2.3,
+    "Balewadi Phata": 3.2,
+    "Bhosari": 20.2,
+    "Bhumkar Chowk / Bhumkar Nagar": 4.1,
+    "Borate Vasti": 2.6,
+    "Hadapsar": 25.8,
+    "Hinjawadi": 18.6,
+    "Karve Road": 5.4,
+    "Katraj": 18.1,
+    "Kothrud": 21.7,
+    "Lohegaon": 10.5,
+    "Manjri": 12.3,
+    "Model Colony": 1.9,
+    "Nigdi": 9.6,
+    "Nilanjali Society": 0.8,
+    "Panchawati / Pashan": 7.4,
+    "Rambaug Colony": 1.4,
+    "Revenue Colony-Shivajinagar": 2.1,
+    "Sakal Nagar": 1.6,
+    "Shivajinagar": 3.5,
+    "Sus": 9.1,
+    "Tathawade": 6.8,
+    "Wakad": 9.8
+}
+
+# --- 3. API Key and Headers ---
+EOS_API_KEY = os.getenv("apk.3053e16b25638262973480cd8f2f4a5d4ac9d3e14dc89c31ada444822fa9f146")  # Set in Colab environment
+headers = {
+    "Authorization": f"Bearer {EOS_API_KEY}",
+    "Content-Type": "application/json"
+}
+
+# --- 4. Original Rule-Based Functions (for Synthetic Data Ground Truth) ---
+def get_weather_aqi(lat, lon):
+    if EOS_API_KEY is None:
+        # DEMO DATA (fallback)
+        return {
+            "temperature": np.random.uniform(28, 38),
+            "humidity": np.random.uniform(40, 80),
+            "wind_speed": np.random.uniform(1, 6),
+            "pm2_5": np.random.uniform(20, 90),
+            "pm10": np.random.uniform(40, 180)
+        }
+    try:
+        url = "https://api.eos.com/v1/weather/point"
+        payload = {
+            "lat": lat,
+            "lon": lon,
+            "parameters": [
+                "temperature",
+                "humidity",
+                "wind_speed",
+                "pm2_5",
+                "pm10"
+            ]
+        }
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except Exception:
+        # fallback if API fails
+        return {
+            "temperature": np.random.uniform(28, 38),
+            "humidity": np.random.uniform(40, 80),
+            "wind_speed": np.random.uniform(1, 6),
+            "pm2_5": np.random.uniform(20, 90),
+            "pm10": np.random.uniform(40, 180)
+        }
+
+def calculate_aqi(pm25, pm10):
+    if pm25 > 60 or pm10 > 150:
+        return "Poor"
+    elif pm25 > 35 or pm10 > 100:
+        return "Moderate"
+    else:
+        return "Good"
+
+def predict_uhi(temp, humidity, wind):
+    return (0.6 * temp) + (0.02 * humidity) - (0.5 * wind)
+
+def calculate_trees_needed(aqi, uhi):
+    trees_count = 0
+    if aqi == "Poor":
+        if uhi > 20:
+            trees_count = np.random.randint(55, 80)
+        else:
+            trees_count = np.random.randint(35, 55)
+    elif aqi == "Moderate":
+        if uhi > 18:
+            trees_count = np.random.randint(25, 45)
+        else:
+            trees_count = np.random.randint(12, 25)
+    else:  # aqi == "Good"
+        trees_count = np.random.randint(1, 15)
+    return trees_count
+
+def plantation_decision(uhi, aqi):
+    if aqi == "Poor" and uhi > 35:
+        return "HIGH PRIORITY"
+    elif aqi == "Moderate" and uhi > 30:
+        return "MEDIUM PRIORITY"
+    else:
+        return "LOW / NO PRIORITY"
+
+# --- 5. Feature Ranges for Synthetic Data ---
+feature_ranges = {
+    "temperature": (20, 45),
+    "humidity": (30, 95),
+    "wind_speed": (0.5, 10),
+    "pm2_5": (10, 200),
+    "pm10": (20, 350)
+}
+
+# --- 6. Generate Synthetic Training Data ---
+n_samples = 5000
+synthetic_data = []
+
+for _ in range(n_samples):
+    temp = np.random.uniform(feature_ranges["temperature"][0], feature_ranges["temperature"][1])
+    humidity = np.random.uniform(feature_ranges["humidity"][0], feature_ranges["humidity"][1])
+    wind = np.random.uniform(feature_ranges["wind_speed"][0], feature_ranges["wind_speed"][1])
+    pm25 = np.random.uniform(feature_ranges["pm2_5"][0], feature_ranges["pm2_5"][1])
+    pm10 = np.random.uniform(feature_ranges["pm10"][0], feature_ranges["pm10"][1])
+
+    aqi_true = calculate_aqi(pm25, pm10)
+    uhi_true = predict_uhi(temp, humidity, wind)
+    trees_to_plant_true = calculate_trees_needed(aqi_true, uhi_true)
+
+    synthetic_data.append({
+        "temperature": temp,
+        "humidity": humidity,
+        "wind_speed": wind,
+        "pm2_5": pm25,
+        "pm10": pm10,
+        "aqi_true": aqi_true,
+        "uhi_true": uhi_true,
+        "trees_to_plant_true": trees_to_plant_true
+    })
+
+df_synthetic = pd.DataFrame(synthetic_data)
+
+# --- 7. Train AQI Classifier Model ---
+X_aqi = df_synthetic[['pm2_5', 'pm10']]
+y_aqi_categorical = df_synthetic['aqi_true']
+label_encoder_aqi = LabelEncoder()
+y_aqi_encoded = label_encoder_aqi.fit_transform(y_aqi_categorical)
+aqi_classifier_model = DecisionTreeClassifier(random_state=42)
+aqi_classifier_model.fit(X_aqi, y_aqi_encoded)
+
+# --- 8. Train UHI Regression Model ---
+X_uhi = df_synthetic[['temperature', 'humidity', 'wind_speed']]
+y_uhi = df_synthetic['uhi_true']
+uhi_regressor_model = DecisionTreeRegressor(random_state=42)
+uhi_regressor_model.fit(X_uhi, y_uhi)
+
+# --- 9. Train Tree Prediction Regression Model ---
+X_trees_categorical = df_synthetic[['aqi_true']]
+X_trees_numerical = df_synthetic[['uhi_true']]
+one_hot_encoder_aqi = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('cat', one_hot_encoder_aqi, ['aqi_true'])
+    ],
+    remainder='passthrough'
+)
+X_trees_encoded = preprocessor.fit_transform(df_synthetic[['aqi_true', 'uhi_true']])
+encoded_feature_names = preprocessor.named_transformers_['cat'].get_feature_names_out(['aqi_true'])
+all_feature_names = list(encoded_feature_names) + ['uhi_true']
+X_trees = pd.DataFrame(X_trees_encoded, columns=all_feature_names)
+y_trees = df_synthetic['trees_to_plant_true']
+tree_regressor_model = DecisionTreeRegressor(random_state=42)
+tree_regressor_model.fit(X_trees, y_trees)
+
+# --- 10. Integrate Trained Models into Data Processing Loop ---
+results_ml = []
+
+for zone, coord in zones.items():
+    data = get_weather_aqi(coord[0], coord[1])
+
+    temp = data["temperature"]
+    humidity = data["humidity"]
+    wind = data["wind_speed"]
+    pm25 = data["pm2_5"]
+    pm10 = data["pm10"]
+
+    aqi_input_df = pd.DataFrame([[pm25, pm10]], columns=['pm2_5', 'pm10'])
+    aqi_predicted_encoded = aqi_classifier_model.predict(aqi_input_df)
+    aqi = label_encoder_aqi.inverse_transform(aqi_predicted_encoded)[0]
+
+    uhi_input_df = pd.DataFrame([[temp, humidity, wind]], columns=['temperature', 'humidity', 'wind_speed'])
+    uhi_predicted = uhi_regressor_model.predict(uhi_input_df)[0]
+
+    decision = plantation_decision(uhi_predicted, aqi)
+
+    trees_input_df = pd.DataFrame([[aqi, uhi_predicted]], columns=['aqi_true', 'uhi_true'])
+    trees_input_transformed = preprocessor.transform(trees_input_df)
+    trees_input_df_for_prediction = pd.DataFrame(trees_input_transformed, columns=all_feature_names)
+    trees_to_plant = round(tree_regressor_model.predict(trees_input_df_for_prediction)[0])
+
+    zone_area = custom_zone_areas.get(zone, 1.0)
+
+    results_ml.append({
+        "Zone": zone,
+        "Temperature (°C)": round(temp, 2),
+        "Humidity (%)": round(humidity, 2),
+        "AQI": aqi,
+        "UHI Index": round(uhi_predicted, 2),
+        "Plantation Priority": decision,
+        "Trees to Plant": trees_to_plant,
+        "Area (sq km)": round(zone_area, 2)
+    })
+
+df_results_ml = pd.DataFrame(results_ml)
+df_results_ml["Trees per sq km"] = df_results_ml["Trees to Plant"] / df_results_ml["Area (sq km)"]
+df_results_ml["Trees per sq km"] = df_results_ml["Trees per sq km"].round(2)
+
+# --- 11. Map Generation ---
+m_ml = folium.Map(location=[18.52, 73.85], zoom_start=12)
+
+fixed_radius_meters = 500 # This will be the visual size of all circles on the map
+
+for index, r_series in df_results_ml.iterrows():
+    r = r_series.to_dict()
+
+    trees_needed = r["Trees to Plant"]
+    marker_color = "gray"
+
+    if trees_needed > 50:
+        marker_color = "red"
+    elif trees_needed > 30:
+        marker_color = "yellow"
+    elif trees_needed > 10:
+        marker_color = "green"
+    else:
+        marker_color = "lightgray"
+
+    area_sq_km_for_zone = r["Area (sq km)"]
+    if area_sq_km_for_zone > 0:
+        radius_km_for_zone_for_popup = np.sqrt(area_sq_km_for_zone / np.pi)
+    else:
+        radius_km_for_zone_for_popup = 0.1
+
+    radius_meters_for_zone = radius_km_for_zone_for_popup * 1000
+
+    folium.Circle(
+        location=[zones[r["Zone"]][0], zones[r["Zone"]][1]],
+        radius=fixed_radius_meters,
+        color=marker_color,
+        fill=True,
+        fill_color=marker_color,
+        fill_opacity=0.7,
+        popup=f"""
+        <b>{r['Zone']}</b><br>
+        Temp: {r['Temperature (°C)']}°C<br>
+        AQI: {r['AQI']}<br>
+        UHI Index: {r['UHI Index']}<br>
+        <b>Trees to Plant: {r['Trees to Plant']}</b><br>
+        Area (sq km): {r['Area (sq km)']:.2f}<br>
+        Trees per sq km: {r['Trees per sq km']:.2f}<br>
+        Calculated Radius from Area: {radius_km_for_zone_for_popup:.2f} km
+        """
+    ).add_to(m_ml)
+
+m_ml
