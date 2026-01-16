@@ -1,0 +1,542 @@
+front end program:                        -                                                                                                                                                                                                                                                       <!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>GreenAI Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<!-- Bootstrap -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+<!-- Icons -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+:root {
+    --green:#198754;
+    --glass:rgba(255,255,255,.75);
+}
+
+/* GLOBAL */
+body {
+    background:#f4f6f8;
+    transition:.3s;
+}
+
+body.dark {
+    background:#0f172a;
+    color:#e5e7eb;
+}
+
+body.dark .card,
+body.dark .stat-card {
+    background:rgba(30,41,59,.9);
+    color:#e5e7eb;
+}
+
+.fade {
+    animation:fade .8s ease forwards;
+}
+@keyframes fade {
+    from {opacity:0; transform:translateY(25px);}
+    to {opacity:1; transform:none;}
+}
+
+/* STAT CARDS */
+.stat-card {
+    background:var(--glass);
+    backdrop-filter:blur(12px);
+    padding:25px;
+    border-radius:16px;
+    box-shadow:0 12px 30px rgba(0,0,0,.1);
+    transition:.3s;
+}
+.stat-card:hover {transform:translateY(-6px);}
+
+/* MAP */
+.map-container {
+    height:450px;
+    border-radius:16px;
+    overflow:hidden;
+}
+
+/* TABLE */
+.table-hover tbody tr {
+    transition:.2s;
+}
+.table-hover tbody tr:hover {
+    background:rgba(25,135,84,.08);
+    transform:scale(1.01);
+}
+
+/* BADGES */
+.badge-Poor {background:#dc3545;}
+.badge-Moderate {background:#ffc107;color:#000;}
+.badge-Good {background:#198754;}
+
+/* AQI LEGEND */
+.legend span {
+    padding:6px 14px;
+    border-radius:20px;
+    font-size:.85rem;
+    color:white;
+    margin-right:8px;
+}
+
+/* TOGGLE */
+.theme-toggle {cursor:pointer;font-size:1.4rem;}
+
+@media(max-width:768px){
+    h1{font-size:1.4rem;}
+    .map-container{height:300px;}
+}
+</style>
+</head>
+
+<body class="fade">
+
+<div class="container py-4">
+
+<!-- HEADER -->
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="fw-bold text-success">
+        <i class="bi bi-tree-fill me-2"></i>GreenAI
+        <span class="fs-6 text-muted">Urban Plantation Analytics</span>
+    </h1>
+    <i class="bi bi-moon-stars-fill theme-toggle" onclick="toggleTheme()"></i>
+</div>
+
+<!-- STATISTICS -->
+<div class="row g-4 mb-4">
+    <div class="col-md-4">
+        <div class="stat-card text-center">
+            <h2 class="fw-bold text-success">{{ stats.total_trees }}</h2>
+            <p>Total Trees Required</p>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="stat-card text-center">
+            <h2 class="fw-bold">{{ stats.avg_uhi }}</h2>
+            <p>Average UHI Index</p>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="stat-card text-center">
+            <h2 class="fw-bold text-danger">{{ stats.poor_aqi_count }}</h2>
+            <p>Critical AQI Zones</p>
+        </div>
+    </div>
+</div>
+
+<!-- LIVE AQI -->
+<div class="row g-4 mb-4">
+    <div class="col-md-4">
+        <div class="stat-card text-center">
+            <h6 class="text-muted">Live AQI</h6>
+            <h2 id="liveAQI" class="fw-bold text-success">72</h2>
+            <small id="aqiTrend">Stable</small>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="stat-card text-center">
+            <h6 class="text-muted">Predicted AQI (ML)</h6>
+            <h2 id="predAQI" class="fw-bold text-warning">68</h2>
+            <small>Next 24 hrs</small>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="stat-card text-center">
+            <h6 class="text-muted">Plantation Impact</h6>
+            <h2 class="fw-bold text-success">↓ 12%</h2>
+            <small>Projected Improvement</small>
+        </div>
+    </div>
+</div>
+
+<!-- AQI LEGEND -->
+<div class="legend mb-3">
+    <span style="background:#198754">Good</span>
+    <span style="background:#ffc107;color:black">Moderate</span>
+    <span style="background:#dc3545">Poor</span>
+</div>
+
+<!-- MAP -->
+<div class="card p-3 mb-4">
+    <h5 class="fw-semibold mb-2">
+        <i class="bi bi-geo-alt-fill text-success me-2"></i>Geospatial Analysis
+    </h5>
+    <div class="map-container">
+        {{ map_html|safe }}
+    </div>
+</div>
+
+<!-- CHART -->
+<div class="card p-4 mb-4">
+    <h5 class="fw-semibold mb-3">
+        <i class="bi bi-graph-up me-2"></i>Actual vs Predicted AQI
+    </h5>
+    <canvas id="realtimeChart" height="120"></canvas>
+</div>
+
+<!-- SEARCH -->
+<input type="text" id="search" class="form-control mb-3"
+       placeholder="🔍 Search zone..." onkeyup="filterTable()">
+
+<!-- TABLE -->
+<div class="card p-4">
+<div class="table-responsive">
+<table class="table table-hover align-middle" id="zoneTable">
+<thead class="table-light">
+<tr>
+    <th>Zone</th>
+    <th>Temp</th>
+    <th>AQI</th>
+    <th>UHI</th>
+    <th>Trees Needed</th>
+    <th>Density</th>
+</tr>
+</thead>
+<tbody>
+{% for row in table_data %}
+<tr>
+    <td>{{ row.Zone }}</td>
+    <td>{{ row.Temp }}</td>
+    <td><span class="badge badge-{{ row.AQI }}">{{ row.AQI }}</span></td>
+    <td>{{ row.UHI }}</td>
+    <td class="fw-bold text-success">{{ row.TreesNeeded }}</td>
+    <td>{{ row.TreesPerSqKm }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+
+</div>
+
+<!-- JS -->
+<script>
+function toggleTheme(){
+    document.body.classList.toggle("dark");
+}
+
+function filterTable(){
+    let input=document.getElementById("search").value.toLowerCase();
+    document.querySelectorAll("#zoneTable tbody tr").forEach(row=>{
+        row.style.display=row.innerText.toLowerCase().includes(input)?"":"none";
+    });
+}
+
+/* CHART */
+let ctx=document.getElementById("realtimeChart");
+let chart=new Chart(ctx,{
+    type:"line",
+    data:{
+        labels:["Now","+6h","+12h","+18h","+24h"],
+        datasets:[
+            {
+                label:"Actual AQI",
+                data:[72,74,73,71,70],
+                borderWidth:3,
+                tension:.4
+            },
+            {
+                label:"Predicted AQI (ML)",
+                data:[68,66,64,63,62],
+                borderDash:[6,6],
+                borderWidth:3,
+                tension:.4
+            }
+        ]
+    },
+    options:{responsive:true}
+});
+
+/* LIVE SIMULATION */
+setInterval(()=>{
+    let val=Math.floor(65+Math.random()*10);
+    document.getElementById("liveAQI").innerText=val;
+    document.getElementById("aqiTrend").innerText=
+        val<70?"Improving ↓":"Worsening ↑";
+    chart.data.datasets[0].data.shift();
+    chart.data.datasets[0].data.push(val);
+    chart.update();
+},4000);
+</script>
+
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>GreenAI Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<!-- Bootstrap -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+<!-- Icons -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+:root {
+    --green:#198754;
+    --glass:rgba(255,255,255,.75);
+}
+
+/* GLOBAL */
+body {
+    background:#f4f6f8;
+    transition:.3s;
+}
+
+body.dark {
+    background:#0f172a;
+    color:#e5e7eb;
+}
+
+body.dark .card,
+body.dark .stat-card {
+    background:rgba(30,41,59,.9);
+    color:#e5e7eb;
+}
+
+.fade {
+    animation:fade .8s ease forwards;
+}
+@keyframes fade {
+    from {opacity:0; transform:translateY(25px);}
+    to {opacity:1; transform:none;}
+}
+
+/* STAT CARDS */
+.stat-card {
+    background:var(--glass);
+    backdrop-filter:blur(12px);
+    padding:25px;
+    border-radius:16px;
+    box-shadow:0 12px 30px rgba(0,0,0,.1);
+    transition:.3s;
+}
+.stat-card:hover {transform:translateY(-6px);}
+
+/* MAP */
+.map-container {
+    height:450px;
+    border-radius:16px;
+    overflow:hidden;
+}
+
+/* TABLE */
+.table-hover tbody tr {
+    transition:.2s;
+}
+.table-hover tbody tr:hover {
+    background:rgba(25,135,84,.08);
+    transform:scale(1.01);
+}
+
+/* BADGES */
+.badge-Poor {background:#dc3545;}
+.badge-Moderate {background:#ffc107;color:#000;}
+.badge-Good {background:#198754;}
+
+/* AQI LEGEND */
+.legend span {
+    padding:6px 14px;
+    border-radius:20px;
+    font-size:.85rem;
+    color:white;
+    margin-right:8px;
+}
+
+/* TOGGLE */
+.theme-toggle {cursor:pointer;font-size:1.4rem;}
+
+@media(max-width:768px){
+    h1{font-size:1.4rem;}
+    .map-container{height:300px;}
+}
+</style>
+</head>
+
+<body class="fade">
+
+<div class="container py-4">
+
+<!-- HEADER -->
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="fw-bold text-success">
+        <i class="bi bi-tree-fill me-2"></i>GreenAI
+        <span class="fs-6 text-muted">Urban Plantation Analytics</span>
+    </h1>
+    <i class="bi bi-moon-stars-fill theme-toggle" onclick="toggleTheme()"></i>
+</div>
+
+<!-- STATISTICS -->
+<div class="row g-4 mb-4">
+    <div class="col-md-4">
+        <div class="stat-card text-center">
+            <h2 class="fw-bold text-success">{{ stats.total_trees }}</h2>
+            <p>Total Trees Required</p>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="stat-card text-center">
+            <h2 class="fw-bold">{{ stats.avg_uhi }}</h2>
+            <p>Average UHI Index</p>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="stat-card text-center">
+            <h2 class="fw-bold text-danger">{{ stats.poor_aqi_count }}</h2>
+            <p>Critical AQI Zones</p>
+        </div>
+    </div>
+</div>
+
+<!-- LIVE AQI -->
+<div class="row g-4 mb-4">
+    <div class="col-md-4">
+        <div class="stat-card text-center">
+            <h6 class="text-muted">Live AQI</h6>
+            <h2 id="liveAQI" class="fw-bold text-success">72</h2>
+            <small id="aqiTrend">Stable</small>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="stat-card text-center">
+            <h6 class="text-muted">Predicted AQI (ML)</h6>
+            <h2 id="predAQI" class="fw-bold text-warning">68</h2>
+            <small>Next 24 hrs</small>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="stat-card text-center">
+            <h6 class="text-muted">Plantation Impact</h6>
+            <h2 class="fw-bold text-success">↓ 12%</h2>
+            <small>Projected Improvement</small>
+        </div>
+    </div>
+</div>
+
+<!-- AQI LEGEND -->
+<div class="legend mb-3">
+    <span style="background:#198754">Good</span>
+    <span style="background:#ffc107;color:black">Moderate</span>
+    <span style="background:#dc3545">Poor</span>
+</div>
+
+<!-- MAP -->
+<div class="card p-3 mb-4">
+    <h5 class="fw-semibold mb-2">
+        <i class="bi bi-geo-alt-fill text-success me-2"></i>Geospatial Analysis
+    </h5>
+    <div class="map-container">
+        {{ map_html|safe }}
+    </div>
+</div>
+
+<!-- CHART -->
+<div class="card p-4 mb-4">
+    <h5 class="fw-semibold mb-3">
+        <i class="bi bi-graph-up me-2"></i>Actual vs Predicted AQI
+    </h5>
+    <canvas id="realtimeChart" height="120"></canvas>
+</div>
+
+<!-- SEARCH -->
+<input type="text" id="search" class="form-control mb-3"
+       placeholder="🔍 Search zone..." onkeyup="filterTable()">
+
+<!-- TABLE -->
+<div class="card p-4">
+<div class="table-responsive">
+<table class="table table-hover align-middle" id="zoneTable">
+<thead class="table-light">
+<tr>
+    <th>Zone</th>
+    <th>Temp</th>
+    <th>AQI</th>
+    <th>UHI</th>
+    <th>Trees Needed</th>
+    <th>Density</th>
+</tr>
+</thead>
+<tbody>
+{% for row in table_data %}
+<tr>
+    <td>{{ row.Zone }}</td>
+    <td>{{ row.Temp }}</td>
+    <td><span class="badge badge-{{ row.AQI }}">{{ row.AQI }}</span></td>
+    <td>{{ row.UHI }}</td>
+    <td class="fw-bold text-success">{{ row.TreesNeeded }}</td>
+    <td>{{ row.TreesPerSqKm }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+
+</div>
+
+<!-- JS -->
+<script>
+function toggleTheme(){
+    document.body.classList.toggle("dark");
+}
+
+function filterTable(){
+    let input=document.getElementById("search").value.toLowerCase();
+    document.querySelectorAll("#zoneTable tbody tr").forEach(row=>{
+        row.style.display=row.innerText.toLowerCase().includes(input)?"":"none";
+    });
+}
+
+/* CHART */
+let ctx=document.getElementById("realtimeChart");
+let chart=new Chart(ctx,{
+    type:"line",
+    data:{
+        labels:["Now","+6h","+12h","+18h","+24h"],
+        datasets:[
+            {
+                label:"Actual AQI",
+                data:[72,74,73,71,70],
+                borderWidth:3,
+                tension:.4
+            },
+            {
+                label:"Predicted AQI (ML)",
+                data:[68,66,64,63,62],
+                borderDash:[6,6],
+                borderWidth:3,
+                tension:.4
+            }
+        ]
+    },
+    options:{responsive:true}
+});
+
+/* LIVE SIMULATION */
+setInterval(()=>{
+    let val=Math.floor(65+Math.random()*10);
+    document.getElementById("liveAQI").innerText=val;
+    document.getElementById("aqiTrend").innerText=
+        val<70?"Improving ↓":"Worsening ↑";
+    chart.data.datasets[0].data.shift();
+    chart.data.datasets[0].data.push(val);
+    chart.update();
+},4000);
+</script>
+
+</body>
+</html>
